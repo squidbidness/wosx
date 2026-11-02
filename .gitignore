@@ -38,3 +38,8 @@ build/
 build_debug/
 .vscode/
 .venv/
+arh_phd/results/
+demo_apps/basic_2d/model_problems/engine/solutions/wost.pfm
+demo_apps/basic_2d/model_problems/engine/solutions/wost_color.pfm
+demo_apps/basic_2d/model_problems/engine/solutions/wost_color_preview.png
+demo_apps/basic_2d/model_problems/engine/solutions/wost_preview.png

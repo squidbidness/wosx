@@ -19,6 +19,7 @@
 
 #include <wosx/point_estimation/walk_on_spheres.h>
 #include <wosx/point_estimation/walk_on_stars.h>
+#include <wosx/point_estimation/walk_on_tangent_spheres.h>
 #include <wosx/variance_reduction/boundary_samplers.h>
 #include <wosx/variance_reduction/domain_samplers.h>
 #include <wosx/variance_reduction/boundary_value_caching.h>

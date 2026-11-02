@@ -20,6 +20,22 @@ if(MSVC)
     target_compile_options(basic_2d_demo PRIVATE /bigobj)
 endif()
 
+# independent CPU Construction 4 benchmark and numerical validation
+add_executable(construction4_benchmark construction4/benchmark.cpp)
+target_link_libraries(construction4_benchmark wosx)
+if(MSVC)
+    target_compile_options(construction4_benchmark PRIVATE /bigobj)
+endif()
+
+# mesh benchmark uses the supplied 2D loader and a separate whole-boundary BVH.
+add_executable(construction4_mesh_benchmark construction4/mesh_benchmark.cpp)
+target_link_libraries(construction4_mesh_benchmark wosx)
+target_include_directories(construction4_mesh_benchmark PRIVATE ${WOSX_DEMO_APPS_DEPS_INCLUDES})
+target_compile_definitions(construction4_mesh_benchmark PRIVATE WOSX_DEFINE_STB_IMPLEMENTATION)
+if(MSVC)
+    target_compile_options(construction4_mesh_benchmark PRIVATE /bigobj)
+endif()
+
 # build demo apps (gpu backend)
 if(WOSX_ENABLE_GPU_SUPPORT)
     add_executable(basic_2d_gpu_demo basic_2d/gpu_demo.cpp)
