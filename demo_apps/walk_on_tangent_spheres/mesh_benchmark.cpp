@@ -9,7 +9,7 @@
 
 namespace {
 using namespace wosx;
-using namespace construction4_mesh;
+using namespace walk_on_tangent_spheres_mesh;
 struct BenchmarkResult {
     double mean = 0;
     double standardError = 0;
@@ -111,7 +111,7 @@ BenchmarkResult runSolver(MeshModel& model,
             solver.solve(pde, walkSettings, tangentSettings, walks, sample, statistics, diagnostics);
         } catch (const std::exception& error) {
             throw std::runtime_error(
-                std::string("Construction 4 failed: ") + error.what() + "; evaluation_point=(" +
+                std::string("Walk on Tangent Spheres failed: ") + error.what() + "; evaluation_point=(" +
                 std::to_string(pt.x()) + "," + std::to_string(pt.y()) + ")" + "; seed=" + std::to_string(seed) +
                 "; completed=" + std::to_string(diagnostics.walksCompleted) +
                 " attempted=" + std::to_string(diagnostics.walksAttempted) +
@@ -218,10 +218,11 @@ int main(int argc, char** argv)
                 continue;
             }
             if (key == "--help") {
-                std::cout << "construction4_mesh_benchmark --case manufactured|engine [--root repo] [--config path]\n"
-                          << " [--points 16] [--walks 6000] [--seed 20261030] [--cap .01] [--radius .4]\n"
-                          << " [--tol-dirichlet .01] [--tol-neumann .01] [--max-steps 100000]\n"
-                          << " [--reference-walks 65536] [--reference-tolerance .0001] [--validate-only]\n";
+                std::cout
+                    << "walk_on_tangent_spheres_mesh_benchmark --case manufactured|engine [--root repo] [--config path]\n"
+                    << " [--points 16] [--walks 6000] [--seed 20261030] [--cap .01] [--radius .4]\n"
+                    << " [--tol-dirichlet .01] [--tol-neumann .01] [--max-steps 100000]\n"
+                    << " [--reference-walks 65536] [--reference-tolerance .0001] [--validate-only]\n";
                 return 0;
             }
             if (i + 1 == argc) {
@@ -323,7 +324,7 @@ int main(int argc, char** argv)
             << " epsilonD=" << options.tolD << " epsilonN=" << options.tolN
             << " reference_walks=" << options.referenceWalks << " reference_tolerance=" << options.referenceTolerance
             << '\n'
-            << "# C4 queries=whole-boundary position+center searches; WoSt queries=distance,projection,star,ray,sample,visibility.\n"
+            << "# WoTS queries=whole-boundary position+center searches; WoSt queries=distance,projection,star,ray,sample,visibility.\n"
             << "# Single-threaded timings exclude loading, BVH builds, validation, reference and initial point metadata.\n"
             << "# Engine differences use an independently seeded finer-tolerance WoSt reference, not an exact solution.\n";
         std::cout
@@ -346,12 +347,12 @@ int main(int argc, char** argv)
                 const auto result =
                     runSolver(model, mesh, pde, points[i], options, method == 0, false, options.seed + i * 104729ULL);
                 writeResult(options.problem == "manufactured" ? "exact_error" : "reference_discrepancy", int(i),
-                            points[i], method == 0 ? "construction4" : "wost", result, referenceValue,
+                            points[i], method == 0 ? "walk_on_tangent_spheres" : "wost", result, referenceValue,
                             referenceStandardError);
                 summaries[method].add(result, referenceValue, referenceStandardError);
             }
         }
-        summaries[0].print("construction4", int(points.size()));
+        summaries[0].print("walk_on_tangent_spheres", int(points.size()));
         summaries[1].print("wost", int(points.size()));
         return 0;
     } catch (const std::exception& error) {

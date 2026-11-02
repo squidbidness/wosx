@@ -8,7 +8,7 @@
 #include <atomic>
 #include <stdexcept>
 
-namespace construction4_mesh {
+namespace walk_on_tangent_spheres_mesh {
 using wosx::Vector2;
 using wosx::Vector2i;
 // Expose geometry only in this benchmark; leave the supplied loader unchanged.
@@ -300,4 +300,4 @@ inline wosx::GeometricQueries<2> countedQueries(const wosx::GeometricQueries<2>&
     };
     return q;
 }
-} // construction4_mesh
+} // walk_on_tangent_spheres_mesh

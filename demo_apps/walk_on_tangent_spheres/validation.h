@@ -7,7 +7,7 @@
 #include <iostream>
 #include <array>
 
-namespace construction4 {
+namespace walk_on_tangent_spheres {
 inline void require(bool condition, const char* message)
 {
     if (!condition) {
@@ -173,12 +173,12 @@ inline void validateSolver()
     require(diag.walksCompleted == 1000 && diag.nearestPointQueries == diag.interiorSteps + diag.tangentSteps + 1000 &&
                 diag.tangentSteps > 0 && diag.failures == 0,
             "Recursive constant test completion");
-    require(rect.counts.ray == 0 && rect.counts.starRadius == 0, "Construction 4 used ray/star queries");
+    require(rect.counts.ray == 0 && rect.counts.starRadius == 0, "Walk on Tangent Spheres used ray/star queries");
     require(rect.counts.wholeBoundary.load() == diag.nearestPointQueries + diag.centerCertificates,
             "Whole-boundary query accounting mismatch");
     require(rect.counts.absorbingDistance == 0 && rect.counts.reflectingDistance == 0 &&
                 rect.counts.absorbingProjection == 0 && rect.counts.reflectingProjection == 0,
-            "Construction 4 used separate distance or projection queries");
+            "Walk on Tangent Spheres used separate distance or projection queries");
     const auto nearJunction = rect.nearestBoundary(Vector2(.995f, .001f));
     require(nearJunction.isNeumann && nearJunction.normalIsUnique, "Nearest-boundary classification near junction");
     require(!rect.nearestBoundary(Vector2(.999f, .02f)).isNeumann, "Nearest Dirichlet classification");
@@ -279,7 +279,7 @@ inline void validateManufacturedRecursion()
         const double reference = exact(problem, pt.pt);
         const double se = std::sqrt(double(statistics.getEstimatedSolutionVariance()) / n);
         close(statistics.getEstimatedSolution(), reference, 6 * se + .01,
-              "Construction 4 manufactured recursion exceeds sampling+bias regression tolerance");
+              "Walk on Tangent Spheres manufactured recursion exceeds sampling+bias regression tolerance");
         require(diagnostics.walksCompleted == n &&
                     diagnostics.nearestPointQueries == diagnostics.interiorSteps + diagnostics.tangentSteps + n &&
                     diagnostics.failures == 0,
@@ -299,7 +299,7 @@ inline void validateManufacturedRecursion()
         close(baselineStatistics.getEstimatedSolution(), reference, 6 * baselineSe + .01,
               "WoSt shared PDE source/normal convention regression");
         std::cout << "PASS: " << (problem == Problem::Polynomial ? "polynomial" : "harmonic")
-                  << " recursion; C4 mean=" << statistics.getEstimatedSolution() << ", SE=" << se
+                  << " recursion; WoTS mean=" << statistics.getEstimatedSolution() << ", SE=" << se
                   << ", WoSt mean=" << baselineStatistics.getEstimatedSolution() << ", SE=" << baselineSe
                   << ", exact=" << reference << " (explicit bias allowance 0.01)\n";
     }
@@ -345,4 +345,4 @@ inline void selfTest()
     validateSolver();
     validateManufacturedRecursion();
 }
-} // construction4
+} // walk_on_tangent_spheres

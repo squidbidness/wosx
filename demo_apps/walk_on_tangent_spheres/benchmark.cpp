@@ -12,7 +12,7 @@
 int main(int argc, char** argv)
 {
     using namespace wosx;
-    using namespace construction4;
+    using namespace walk_on_tangent_spheres;
     try {
         int nWalks = 6000;
         int maxWalkLength = 100000;
@@ -31,9 +31,10 @@ int main(int argc, char** argv)
                 continue;
             }
             if (key == "--help") {
-                std::cout << "construction4_benchmark [--self-test] [--solver both|construction4|wost]\n"
-                          << " [--case polynomial|harmonic|constant] [--walks N] [--seed N]\n"
-                          << " [--cap d] [--radius r0] [--tol-dirichlet eD] [--tol-neumann eN] [--max-steps N]\n";
+                std::cout
+                    << "walk_on_tangent_spheres_benchmark [--self-test] [--solver both|walk_on_tangent_spheres|wost]\n"
+                    << " [--case polynomial|harmonic|constant] [--walks N] [--seed N]\n"
+                    << " [--cap d] [--radius r0] [--tol-dirichlet eD] [--tol-neumann eN] [--max-steps N]\n";
                 return 0;
             }
             if (i + 1 == argc) {
@@ -71,7 +72,7 @@ int main(int argc, char** argv)
             !std::isfinite(epsilonShellForAbsorbingBoundary) || !std::isfinite(epsilonShellForReflectingBoundary)) {
             throw std::invalid_argument("Need >=2 walks, positive step limit and finite positive tolerances");
         }
-        if (solverType != "both" && solverType != "construction4" && solverType != "wost") {
+        if (solverType != "both" && solverType != "walk_on_tangent_spheres" && solverType != "wost") {
             throw std::invalid_argument("Unknown solver");
         }
         if (problemName != "polynomial" && problemName != "harmonic" && problemName != "constant") {
@@ -81,7 +82,7 @@ int main(int argc, char** argv)
                               ? Problem::Polynomial
                               : (problemName == "harmonic" ? Problem::Harmonic : Problem::Constant);
         std::cout << std::setprecision(10);
-        std::cout << "# Experimental Construction 4; cap/displacement errors omitted; no convergence claim\n"
+        std::cout << "# Experimental Walk on Tangent Spheres; cap/displacement errors omitted; no convergence claim\n"
                   << "# -Delta u=s; polynomial s=-0.6, outward bottom gN=-0.3\n"
                   << "# case=" << problemName << " seed=" << seed << " cap=" << cap << " radius=" << radius
                   << " tolD=" << epsilonShellForAbsorbingBoundary << " tolN=" << epsilonShellForReflectingBoundary
@@ -90,7 +91,7 @@ int main(int argc, char** argv)
             << "solver,walks,reference,mean,signed_error,mc_se,seconds,mean_steps,neumann_encounters,"
             << "distance_D,distance_N,project_D,project_N,ray_queries,boundary_samples,star_queries,"
             << "point_nearest_queries,center_nearest_queries,total_nearest_queries,radius_rejections,cap_adjustments,min_effective_cap,max_effective_cap,failures\n";
-        for (const std::string algorithm : {std::string("construction4"), std::string("wost")}) {
+        for (const std::string algorithm : {std::string("walk_on_tangent_spheres"), std::string("wost")}) {
             if (solverType != "both" && solverType != algorithm) {
                 continue;
             }
@@ -105,7 +106,7 @@ int main(int argc, char** argv)
             uint64_t failures = 0;
             uint64_t encounters = 0;
             const auto start = std::chrono::steady_clock::now();
-            if (algorithm == "construction4") {
+            if (algorithm == "walk_on_tangent_spheres") {
                 TangentSphereSettings tangentSettings;
                 tangentSettings.capChordRadius = cap;
                 tangentSettings.initialTangentRadius = radius;
@@ -113,7 +114,7 @@ int main(int argc, char** argv)
                 try {
                     solver.solve(pde, walkSettings, tangentSettings, nWalks, samplePt, statistics, diagnostics);
                 } catch (const std::exception& error) {
-                    std::cerr << "Construction 4 failed: " << error.what()
+                    std::cerr << "Walk on Tangent Spheres failed: " << error.what()
                               << "; completed=" << diagnostics.walksCompleted
                               << " attempted=" << diagnostics.walksAttempted << " failures=" << diagnostics.failures
                               << ". No estimate reported for the failed batch.\n";

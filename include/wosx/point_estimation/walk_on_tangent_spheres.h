@@ -120,7 +120,7 @@ void WalkOnTangentSpheres<T, 2>::solve(const PDE<T, 2>& pde,
         return;
     }
     if (samplePt.estimationQuantity != EstimationQuantity::Solution) {
-        throw std::invalid_argument("Construction 4 initially supports solution estimates only");
+        throw std::invalid_argument("Walk on Tangent Spheres initially supports solution estimates only");
     }
     if (nWalks <= 0) {
         throw std::invalid_argument("nWalks must be positive");
@@ -307,12 +307,12 @@ void WalkOnTangentSpheres<T, 2>::validate(const PDE<T, 2>& pde,
 {
     if (!queries.domainIsWatertight || !queries.hasNonEmptyAbsorbingBoundary ||
         !queries.hasNonEmptyReflectingBoundary) {
-        throw std::invalid_argument("Construction 4 requires a watertight mixed interior domain");
+        throw std::invalid_argument("Walk on Tangent Spheres requires a watertight mixed interior domain");
     }
     if (walkSettings.solveDoubleSided || pde.absorptionCoeff != 0 || !pde.areRobinConditionsPureNeumann ||
         !pde.isSourceConstant || !pde.source || !pde.dirichlet || !pde.robin) {
         throw std::invalid_argument(
-            "Construction 4 requires pure Neumann reflection and constant source, without absorption");
+            "Walk on Tangent Spheres requires pure Neumann reflection and constant source, without absorption");
     }
     if (walkSettings.ignoreAbsorbingBoundaryContribution || walkSettings.ignoreReflectingBoundaryContribution ||
         walkSettings.ignoreSourceContribution || walkSettings.russianRouletteThreshold != 0 ||
@@ -330,7 +330,7 @@ void WalkOnTangentSpheres<T, 2>::validate(const PDE<T, 2>& pde,
           tangentSettings.capFallbackRatio > 0 && tangentSettings.capFallbackRatio < 2 &&
           tangentSettings.maxRadiusTrials > 0 && std::isfinite(tangentSettings.containmentMargin) &&
           tangentSettings.containmentMargin >= 0)) {
-        throw std::invalid_argument("Invalid Construction 4 settings");
+        throw std::invalid_argument("Invalid Walk on Tangent Spheres settings");
     }
 }
 

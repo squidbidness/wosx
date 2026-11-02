@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <atomic>
 
-namespace construction4 {
+namespace walk_on_tangent_spheres {
 struct QueryCounts {
     std::atomic<uint64_t> absorbingDistance{0};
     std::atomic<uint64_t> reflectingDistance{0};
@@ -227,4 +227,4 @@ inline wosx::SamplePoint<float, 2> samplePoint(uint64_t seed, const wosx::Vector
     sample.rng = pcg32(seed, 1);
     return sample;
 }
-} // construction4
+} // walk_on_tangent_spheres

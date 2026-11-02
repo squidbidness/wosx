@@ -1,4 +1,4 @@
-# Construction 4: Mathematical and computational handoff for Codex
+# Walk on Tangent Spheres: Mathematical and computational handoff for Codex
 
 **Status:** research specification, not a proof of a convergent PDE algorithm.  
 **Prepared:** 2026-10-30.  
@@ -10,7 +10,7 @@
 
 ## 1. Motivation and intended algorithm
 
-Ordinary Walk on Spheres (WoS) solves a Dirichlet problem by sampling uniform points on admissible spheres and terminating near Dirichlet boundary. Mixed Dirichlet–Neumann conditions require a rule for continuing rather than terminating at Neumann boundary encounters. Construction 4 seeks to use **ordinary spheres tangent at the current near-boundary walk point**, with a Green identity whose source point approaches that tangent point. A limiting flux is highly concentrated near the tangent point; instead of sampling extremely short steps, partition the sphere into a short-chord cap `C` and its complement `R`, approximate the unknown solution as locally constant on the cap, then solve algebraically for the solution at the original walk point. The complementary flux, properly normalized, defines **one recursive jump of weight exactly 1**, whose chord distance is at least `d`.
+Ordinary Walk on Spheres (WoS) solves a Dirichlet problem by sampling uniform points on admissible spheres and terminating near Dirichlet boundary. Mixed Dirichlet–Neumann conditions require a rule for continuing rather than terminating at Neumann boundary encounters. Walk on Tangent Spheres seeks to use **ordinary spheres tangent at the current near-boundary walk point**, with a Green identity whose source point approaches that tangent point. A limiting flux is highly concentrated near the tangent point; instead of sampling extremely short steps, partition the sphere into a short-chord cap `C` and its complement `R`, approximate the unknown solution as locally constant on the cap, then solve algebraically for the solution at the original walk point. The complementary flux, properly normalized, defines **one recursive jump of weight exactly 1**, whose chord distance is at least `d`.
 
 Potential advantages to investigate: nonbranching recursion; no special ray-intersection or star-radius geometry queries for the new solver; explicit cap error; a nearest-boundary/clearance-query-only geometry interface. These are motivations and hypotheses, **not** proven comparative advantages over Walk on Stars (WoSt).
 
@@ -244,7 +244,7 @@ For the rectangle, the chosen **current baseline** is `d=0.01`, `r0=0.4` (equiva
 8. Start with the documented baseline `d=0.01`, `r0=0.4`, reduction `1/2`, `ε_N=ε_D=0.01` in the original rectangle, then sweep one parameter at a time. Port the Python experiment and regress C++ statistics to its means *within expected Monte Carlo error*, not to identical random trajectories.
 9. Keep clearly separated in code: exact finite-η representation; special-case proven formulae (`V*=-fr/2` for constant `f` in 2D); assumptions about general limit kernels; and approximate practical correction dropping `E_C` and `D_0`.
 
-## 11. Deferred idea: generalized boundary-operator kernel (SPECULATIVE; NOT Construction 4)
+## 11. Deferred idea: generalized boundary-operator kernel (SPECULATIVE; NOT Walk on Tangent Spheres)
 
 A later discussion proposed a different zero-Dirichlet kernel `K` satisfying formally
 
@@ -252,7 +252,7 @@ A later discussion proposed a different zero-Dirichlet kernel `K` satisfying for
 \Delta_x K(x,y')=\delta(x-y')-\eta\,\mathcal B_x\delta(x-y'),\quad K|_S=0,
 \]
 
-with `\mathcal B` encoding Dirichlet, Neumann, or Robin conditions. Distributional derivatives involve formal-transpose/sign and variable-coefficient issues. A speculative flux-mass split might produce a Robin absorption probability. This has **not** been mathematically established as a unifying Monte Carlo algorithm; it did not recover certain Dirichlet termination. The research scope was intentionally returned to the original zero-Dirichlet Green function `G_η` and Neumann Construction 4 for the first paper. Do not substitute `K` for `G_η` or build Robin behavior unless separately requested.
+with `\mathcal B` encoding Dirichlet, Neumann, or Robin conditions. Distributional derivatives involve formal-transpose/sign and variable-coefficient issues. A speculative flux-mass split might produce a Robin absorption probability. This has **not** been mathematically established as a unifying Monte Carlo algorithm; it did not recover certain Dirichlet termination. The research scope was intentionally returned to the original zero-Dirichlet Green function `G_η` and Neumann Walk on Tangent Spheres for the first paper. Do not substitute `K` for `G_η` or build Robin behavior unless separately requested.
 
 ## 12. Source files supplied to Codex
 
