@@ -1,7 +1,8 @@
 // This file compares CPU solvers on the supplied 2D mesh problems using the
 // existing WoSX geometry and PDE callbacks.
 
-#include "mesh_adapter.h"
+#include "../basic_2d/model_problem.h"
+#include "query_statistics.h"
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -9,8 +10,9 @@
 
 namespace {
 using namespace wosx;
-using namespace walk_on_tangent_spheres_mesh;
+using namespace walk_on_tangent_spheres;
 struct BenchmarkResult {
+    // members
     double mean = 0;
     double standardError = 0;
     double seconds = 0;
@@ -19,12 +21,13 @@ struct BenchmarkResult {
     uint64_t queries = 0;
     uint64_t centers = 0;
     uint64_t cap = 0;
-    uint64_t corners = 0;
+    uint64_t memberships = 0;
     uint64_t rejections = 0;
     uint64_t failures = 0;
 };
 
 struct BenchmarkOptions {
+    // members
     std::string root = ".";
     std::string config = "demo_apps/basic_2d/model_problems/engine/wost.json";
     std::string problem = "manufactured";
@@ -38,13 +41,12 @@ struct BenchmarkOptions {
     double tolD = .01;
     double tolN = .01;
     double referenceTolerance = 1e-4;
-    bool validateOnly = false;
 };
 inline double evaluateExactSolution(const Vector2& pt)
 {
     return 1 + .3 * pt.y() + .2 * double(pt.x()) * pt.x() + .1 * double(pt.y()) * pt.y();
 }
-void setupPDE(PDE<float, 2>& pde, MeshModel& model, bool manufactured)
+void setupPDE(PDE<float, 2>& pde, ModelProblem<float>& model, bool manufactured)
 {
     pde.isSourceConstant = true;
     pde.absorptionCoeff = 0;
@@ -74,8 +76,8 @@ void setupPDE(PDE<float, 2>& pde, MeshModel& model, bool manufactured)
     };
     pde.hasReflectingBoundaryConditions = model.getPDE().hasReflectingBoundaryConditions;
 }
-BenchmarkResult runSolver(MeshModel& model,
-                          MeshAdapter& mesh,
+BenchmarkResult runSolver(ModelProblem<float>& model,
+                          QueryStatistics& counts,
                           const PDE<float, 2>& pde,
                           const Vector2& pt,
                           const BenchmarkOptions& options,
@@ -94,19 +96,16 @@ BenchmarkResult runSolver(MeshModel& model,
                               float(computeReference ? options.referenceTolerance : options.tolN), options.maxSteps,
                               false);
     TangentSphereDiagnostics diagnostics;
-    WoStCounts counts;
-    auto queries = countedQueries(original, counts);
+    const auto& queries = original;
     BenchmarkResult result;
     result.walks = walks;
-    mesh.queryCount = 0;
+    counts.reset();
     const auto start = std::chrono::steady_clock::now();
     if (useTangentSpheres) {
         TangentSphereSettings tangentSettings;
         tangentSettings.capChordRadius = options.cap;
         tangentSettings.initialTangentRadius = options.radius;
-        tangentSettings.allowCornerWosFallback = true;
-        tangentSettings.containmentMargin = 8 * std::numeric_limits<float>::epsilon() * mesh.scale;
-        WalkOnTangentSpheres<float, 2> solver(queries, mesh.callback());
+        WalkOnTangentSpheres<float, 2> solver(queries);
         try {
             solver.solve(pde, walkSettings, tangentSettings, walks, sample, statistics, diagnostics);
         } catch (const std::exception& error) {
@@ -114,18 +113,19 @@ BenchmarkResult runSolver(MeshModel& model,
                 std::string("Walk on Tangent Spheres failed: ") + error.what() + "; evaluation_point=(" +
                 std::to_string(pt.x()) + "," + std::to_string(pt.y()) + ")" + "; seed=" + std::to_string(seed) +
                 "; completed=" + std::to_string(diagnostics.walksCompleted) +
-                " attempted=" + std::to_string(diagnostics.walksAttempted) +
-                " corners=" + std::to_string(diagnostics.cornerFallbacks) + "; no failed-batch estimate reported");
+                " attempted=" + std::to_string(diagnostics.walksAttempted) + "; no failed-batch estimate reported");
         }
-        result.queries = mesh.queryCount.load();
+        result.queries = counts.total();
         result.steps = diagnostics.interiorSteps + diagnostics.tangentSteps;
         result.centers = diagnostics.centerCertificates;
         result.cap = diagnostics.capAdjustments;
-        result.corners = diagnostics.cornerFallbacks;
+        result.memberships = counts.membership;
         result.rejections = diagnostics.radiusRejections;
-        if (result.queries != diagnostics.nearestPointQueries + diagnostics.centerCertificates ||
-            diagnostics.nearestPointQueries != result.steps + result.walks) {
-            throw std::runtime_error("Mesh nearest-query accounting mismatch");
+        if (diagnostics.nearestPointQueries != result.steps + result.walks ||
+            counts.projection != 2 * diagnostics.nearestPointQueries ||
+            counts.distance != 2 * diagnostics.centerCertificates ||
+            counts.membership != diagnostics.initialMembershipChecks + diagnostics.centerMembershipChecks) {
+            throw std::runtime_error("Shared geometry query accounting mismatch");
         }
     } else {
         walkSettings.ignoreSourceContribution = options.problem == "engine";
@@ -139,6 +139,7 @@ BenchmarkResult runSolver(MeshModel& model,
             throw std::runtime_error("WoSt/reference had failed or missing walks; comparison aborted");
         }
         result.queries = counts.total();
+        result.memberships = counts.membership;
         result.steps = uint64_t(std::llround(double(statistics.getMeanWalkLength()) * walks));
     }
     result.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -160,10 +161,12 @@ void writeResult(const char* kind,
               << result.standardError << ',' << std::hypot(result.standardError, referenceStandardError) << ','
               << result.seconds << ',' << double(result.steps) / result.walks << ','
               << double(result.queries) / result.walks << ',' << double(result.centers) / result.walks << ','
-              << double(result.cap) / result.walks << ',' << double(result.corners) / result.walks << ','
+              << double(result.cap) / result.walks << ',' << double(result.memberships) / result.walks << ','
               << double(result.rejections) / result.walks << ',' << result.failures << '\n';
 }
+
 struct BenchmarkSummary {
+    // accumulated statistics
     double squaredErrorSum = 0;
     double varianceSum = 0;
     double referenceVarianceSum = 0;
@@ -174,9 +177,11 @@ struct BenchmarkSummary {
     uint64_t queries = 0;
     uint64_t centers = 0;
     uint64_t cap = 0;
-    uint64_t corners = 0;
+    uint64_t memberships = 0;
     uint64_t rejections = 0;
     uint64_t failures = 0;
+
+    // adds one evaluation point to the summary
     void add(const BenchmarkResult& result, double referenceValue, double referenceStandardError)
     {
         const double error = result.mean - referenceValue;
@@ -190,10 +195,11 @@ struct BenchmarkSummary {
         queries += result.queries;
         centers += result.centers;
         cap += result.cap;
-        corners += result.corners;
+        memberships += result.memberships;
         rejections += result.rejections;
         failures += result.failures;
     }
+    // writes the aggregate comparison statistics
     void print(const char* solver, int n) const
     {
         std::cout << "SUMMARY," << solver << ",points=" << n << ",walks=" << walks
@@ -202,7 +208,7 @@ struct BenchmarkSummary {
                   << ",rms_reference_se=" << std::sqrt(referenceVarianceSum / n) << ",seconds=" << seconds
                   << ",avg_steps=" << double(steps) / walks << ",avg_queries=" << double(queries) / walks
                   << ",avg_center_checks=" << double(centers) / walks << ",avg_cap_fallback=" << double(cap) / walks
-                  << ",avg_corner_fallback=" << double(corners) / walks
+                  << ",avg_membership_checks=" << double(memberships) / walks
                   << ",avg_radius_rejections=" << double(rejections) / walks << ",failures=" << failures << '\n';
     }
 };
@@ -213,16 +219,12 @@ int main(int argc, char** argv)
         BenchmarkOptions options;
         for (int i = 1; i < argc; ++i) {
             std::string key = argv[i];
-            if (key == "--validate-only") {
-                options.validateOnly = true;
-                continue;
-            }
             if (key == "--help") {
                 std::cout
                     << "walk_on_tangent_spheres_mesh_benchmark --case manufactured|engine [--root repo] [--config path]\n"
                     << " [--points 16] [--walks 6000] [--seed 20261030] [--cap .01] [--radius .4]\n"
                     << " [--tol-dirichlet .01] [--tol-neumann .01] [--max-steps 100000]\n"
-                    << " [--reference-walks 65536] [--reference-tolerance .0001] [--validate-only]\n";
+                    << " [--reference-walks 65536] [--reference-tolerance .0001]\n";
                 return 0;
             }
             if (i + 1 == argc) {
@@ -290,27 +292,24 @@ int main(int argc, char** argv)
              !getOptional<bool>(config.at("solver"), "ignoreReflectingBoundaryContribution", false))) {
             throw std::invalid_argument("Supplied-data mode requires disabled source and reflecting contributions");
         }
-        MeshModel model(modelProblemConfig, root.string());
-        MeshAdapter mesh(model);
-        const size_t checks = mesh.validateQueries();
-        std::cout << std::setprecision(10) << "# mesh=" << modelProblemConfig.at("geometry")
-                  << " nonzero_segments=" << mesh.edges.size() << " omitted_zero_edges=" << mesh.omittedZeroEdges
-                  << " geometry_validation_points=" << checks << '\n';
-        if (options.validateOnly) {
-            std::cout << "PASS: closed topology, crossings, orientation, winding signs and brute-force distances\n";
-            return 0;
-        }
+        ModelProblem<float> model(modelProblemConfig, root.string());
+        const auto& queries = model.getGeometricQueries();
         const auto box = model.getBoundingBox();
+        const double scale = (box.second - box.first).norm();
         std::vector<Vector2> candidates;
         for (int j = 0; j < 64; ++j) {
             for (int i = 0; i < 64; ++i) {
                 Vector2 pt = box.first + Vector2((i + .5f) / 64 * (box.second.x() - box.first.x()),
                                                  (j + .5f) / 64 * (box.second.y() - box.first.y()));
-                if (mesh.nearest(pt).signedClearance > .02 * mesh.scale) {
+                if (queries.insideDomain(pt) && queries.computeDistToBoundary(pt, false) > .02 * scale) {
                     candidates.push_back(pt);
                 }
             }
         }
+        QueryStatistics counts;
+        instrumentQueries(model.getGeometricQueries(), counts);
+        std::cout << std::setprecision(10) << "# mesh=" << modelProblemConfig.at("geometry")
+                  << " shared_WoSX_geometry=true approach_direction_normal=true\n";
         if (candidates.size() < size_t(options.points)) {
             throw std::runtime_error("Not enough interior evaluation candidates");
         }
@@ -324,11 +323,11 @@ int main(int argc, char** argv)
             << " epsilonD=" << options.tolD << " epsilonN=" << options.tolN
             << " reference_walks=" << options.referenceWalks << " reference_tolerance=" << options.referenceTolerance
             << '\n'
-            << "# WoTS queries=whole-boundary position+center searches; WoSt queries=distance,projection,star,ray,sample,visibility.\n"
-            << "# Single-threaded timings exclude loading, BVH builds, validation, reference and initial point metadata.\n"
+            << "# Both totals count underlying distance,projection,star,ray,sample,visibility,all-hit searches; membership calls reported separately.\n"
+            << "# Single-threaded timings exclude loading, shared BVH builds, reference and initial point metadata.\n"
             << "# Engine differences use an independently seeded finer-tolerance WoSt reference, not an exact solution.\n";
         std::cout
-            << "kind,point,x,y,solver,reference,reference_se,mean,signed_difference,mc_se,combined_se,seconds,avg_steps,avg_queries,avg_center_checks,avg_cap_fallback,avg_corner_fallback,avg_radius_rejections,failures\n";
+            << "kind,point,x,y,solver,reference,reference_se,mean,signed_difference,mc_se,combined_se,seconds,avg_steps,avg_queries,avg_center_checks,avg_cap_fallback,avg_membership_checks,avg_radius_rejections,failures\n";
         PDE<float, 2> pde;
         setupPDE(pde, model, options.problem == "manufactured");
         BenchmarkSummary summaries[2];
@@ -336,7 +335,7 @@ int main(int argc, char** argv)
             double referenceValue = evaluateExactSolution(points[i]);
             double referenceStandardError = 0;
             if (options.problem == "engine") {
-                const auto result = runSolver(model, mesh, pde, points[i], options, false, true,
+                const auto result = runSolver(model, counts, pde, points[i], options, false, true,
                                               options.seed + 1000000007ULL + i * 104729ULL);
                 referenceValue = result.mean;
                 referenceStandardError = result.standardError;
@@ -345,7 +344,7 @@ int main(int argc, char** argv)
             }
             for (int method = 0; method < 2; ++method) {
                 const auto result =
-                    runSolver(model, mesh, pde, points[i], options, method == 0, false, options.seed + i * 104729ULL);
+                    runSolver(model, counts, pde, points[i], options, method == 0, false, options.seed + i * 104729ULL);
                 writeResult(options.problem == "manufactured" ? "exact_error" : "reference_discrepancy", int(i),
                             points[i], method == 0 ? "walk_on_tangent_spheres" : "wost", result, referenceValue,
                             referenceStandardError);

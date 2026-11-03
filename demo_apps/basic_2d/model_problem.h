@@ -54,7 +54,8 @@ public:
     const std::vector<Vector2>& getReflectingBoundaryPositions() { return mReflectingBoundaryPositions; }
     const std::pair<Vector2, Vector2>& getBoundingBox() { return mBoundingBox; }
     const wosx::PDE<T, 2>& getPDE() { return mPde; }
-    const wosx::GeometricQueries<2>& getGeometricQueries() { return mQueries; }
+    wosx::GeometricQueries<2>& getGeometricQueries() { return mQueries; }
+    const wosx::GeometricQueries<2>& getGeometricQueries() const { return mQueries; }
 
     // getters for inverted domain (needed for solving exterior problems)
     const wosx::KelvinTransform<T, 2>& getKelvinTransform() { return mKelvinTransform; }

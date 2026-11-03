@@ -21,8 +21,7 @@ struct TangentSphereSettings {
     double radiusReduction = .5;
     double capFallbackRatio = 1.9; // d_eff=min(d,1.9r) only if d>=2r
     int maxRadiusTrials = 64;
-    bool allowCornerWosFallback = false; // explicit mesh policy, logged below
-    double containmentMargin = 0;        // conservative extra center clearance for float BVHs
+    double containmentMargin = 0; // optional extra clearance; no mesh-specific margin
 };
 
 struct TangentSphereDiagnostics {
@@ -32,27 +31,17 @@ struct TangentSphereDiagnostics {
     uint64_t interiorSteps = 0;
     uint64_t tangentSteps = 0;
     uint64_t nearestPointQueries = 0;
-    uint64_t cornerFallbacks = 0;
+    uint64_t initialMembershipChecks = 0;
+    uint64_t centerMembershipChecks = 0;
     uint64_t centerCertificates = 0;
     uint64_t radiusRejections = 0;
     uint64_t capAdjustments = 0;
     double minEffectiveCap = std::numeric_limits<double>::infinity();
     double maxEffectiveCap = 0;
-    // Each nearestPointQueries call supplies distance, point, normal, type and sign.
-    // Total whole-boundary nearest queries = nearestPointQueries + centerCertificates.
+    // Logical projection/center checks are separate from underlying callback counts.
+    // Default typed projection searches both boundary structures. Membership checks
+    // may issue ray searches through insideDomain; benchmark counters include those.
 };
-
-struct TangentBoundaryPoint2D {
-    Vector2 point = Vector2::Zero();
-    Vector2 normal = Vector2::Zero();                                  // physical outward unit normal
-    double signedClearance = std::numeric_limits<double>::quiet_NaN(); // >=0 inside
-    bool isNeumann = false;
-    bool normalIsUnique = false;
-};
-// One search of the COMPLETE boundary. Must also provide a reliable inside/outside
-// sign. Do not implement as independent Dirichlet/Neumann searches. A mesh adapter
-// must validate its sign and normals; the initial adapter uses analytic geometry.
-using TangentNearestBoundary2D = std::function<TangentBoundaryPoint2D(const Vector2&)>;
 
 template <typename T, size_t DIM>
 class WalkOnTangentSpheres;
@@ -61,7 +50,7 @@ template <typename T>
 class WalkOnTangentSpheres<T, 2> {
 public:
     // constructor
-    WalkOnTangentSpheres(const GeometricQueries<2>& queries_, TangentNearestBoundary2D nearest);
+    WalkOnTangentSpheres(const GeometricQueries<2>& queries_);
 
     // Experimental approximate recurrence: drops the handoff's C* and D0.
     // PDE source follows WoSX: -Delta u=s, so s=-f in the handoff.
@@ -87,7 +76,6 @@ public:
 private:
     // members
     const GeometricQueries<2>& queries;
-    TangentNearestBoundary2D nearestBoundary;
     [[noreturn]] static void fail(const char* message);
     void validate(const PDE<T, 2>& pde,
                   const WalkSettings& walkSettings,
@@ -98,12 +86,9 @@ private:
 // Implementation
 
 template <typename T>
-WalkOnTangentSpheres<T, 2>::WalkOnTangentSpheres(const GeometricQueries<2>& queries_, TangentNearestBoundary2D nearest)
-    : queries(queries_), nearestBoundary(std::move(nearest))
+WalkOnTangentSpheres<T, 2>::WalkOnTangentSpheres(const GeometricQueries<2>& queries_) : queries(queries_)
 {
-    if (!nearestBoundary) {
-        throw std::invalid_argument("A certified whole-boundary nearest-point callback is required");
-    }
+    // use the same geometry callbacks and representation as WoSt
 }
 
 template <typename T>
@@ -127,6 +112,10 @@ void WalkOnTangentSpheres<T, 2>::solve(const PDE<T, 2>& pde,
     }
     // Commit statistics only if the entire requested batch finishes successfully.
     auto pendingStatistics = statistics;
+    ++diagnostics.initialMembershipChecks;
+    if (!queries.insideDomain(samplePt.pt)) {
+        fail("Initial point is outside the domain");
+    }
     for (int walkIndex = 0; walkIndex < nWalks; ++walkIndex) {
         ++diagnostics.walksAttempted;
         try {
@@ -134,42 +123,41 @@ void WalkOnTangentSpheres<T, 2>::solve(const PDE<T, 2>& pde,
             T total(0.0f);
             int steps = 0;
             for (;;) {
-                // Query once at this position, including the final termination check.
-                // Reuse the returned closest point and normal; never re-project.
+                // Keep the partition label selected by the existing projection
+                // queries, rather than classifying the projected point again.
                 ++diagnostics.nearestPointQueries;
-                const TangentBoundaryPoint2D nearest = nearestBoundary(currentPt);
-                const double distance = nearest.signedClearance;
-                if (!std::isfinite(distance) || distance < 0 || !nearest.point.allFinite()) {
-                    fail("Invalid whole-boundary query or walk point outside the certified domain");
+                Vector2 boundaryPt = currentPt;
+                Vector2 queryNormal;
+                float boundaryDistance;
+                BoundaryType boundaryType;
+                if (!queries.projectToBoundaryWithType(boundaryPt, queryNormal, boundaryDistance, boundaryType,
+                                                       false)) {
+                    fail("Boundary projection failed");
                 }
-                if (!nearest.isNeumann && distance <= walkSettings.epsilonShellForAbsorbingBoundary) {
-                    total = total + pde.dirichlet(nearest.point, false);
+                const double distance = boundaryDistance;
+                if (!std::isfinite(distance) || distance < 0 || !boundaryPt.allFinite() ||
+                    boundaryType == BoundaryType::None || queries.outsideBoundingDomain(currentPt)) {
+                    fail("Invalid boundary projection or walk escaped the bounding domain");
+                }
+                if (boundaryType == BoundaryType::Absorbing &&
+                    distance <= walkSettings.epsilonShellForAbsorbingBoundary) {
+                    total = total + pde.dirichlet(boundaryPt, false);
                     break;
                 }
                 if (steps >= walkSettings.maxWalkLength) {
                     fail("Exceeded maximum walk length; batch has no reported estimate");
                 }
-                const bool nearNeumann =
-                    nearest.isNeumann && distance <= walkSettings.epsilonShellForReflectingBoundary;
-                const bool cornerFallback = nearNeumann && !nearest.normalIsUnique;
-                if (cornerFallback && !tangentSettings.allowCornerWosFallback) {
-                    fail("Nearest Neumann point has no unique outward normal");
-                }
-                if (cornerFallback) {
-                    ++diagnostics.cornerFallbacks;
-                }
-                if (nearNeumann && !cornerFallback) {
-                    const Vector2 reflectingBoundaryPt = nearest.point;
-                    Vector2 normal = nearest.normal;
-                    if (!nearest.normalIsUnique || !normal.allFinite() || normal.norm() < .5f) {
-                        fail("Nearest Neumann point has no unique outward normal");
+                if (boundaryType == BoundaryType::Reflecting &&
+                    distance <= walkSettings.epsilonShellForReflectingBoundary) {
+                    const Vector2 reflectingBoundaryPt = boundaryPt;
+                    // This approach direction is also parallel to y0-y'. It is
+                    // independent of the primitive normal, including at corners.
+                    const Vector2 displacement = reflectingBoundaryPt - currentPt;
+                    const float displacementLength = displacement.norm();
+                    if (!(displacementLength > 0) || !std::isfinite(displacementLength)) {
+                        fail("Approach direction is undefined at an exact boundary point");
                     }
-                    normal.normalize();
-                    if ((currentPt - reflectingBoundaryPt).dot(normal) > 1e-6f ||
-                        ((currentPt - reflectingBoundaryPt) + float(distance) * normal).norm() >
-                            1e-5f + 1e-3f * float(distance)) {
-                        fail("Neumann nearest point is not in a normal tubular neighborhood");
-                    }
+                    const Vector2 normal = displacement / displacementLength;
                     double tangentRadius = tangentSettings.initialTangentRadius;
                     bool accepted = false;
                     double lastRadius = tangentRadius;
@@ -178,12 +166,14 @@ void WalkOnTangentSpheres<T, 2>::solve(const PDE<T, 2>& pde,
                     for (int trial = 0; trial < tangentSettings.maxRadiusTrials; ++trial) {
                         Vector2 c = currentPt - float(tangentRadius) * normal;
                         ++diagnostics.centerCertificates;
-                        const double clearance = nearestBoundary(c).signedClearance;
+                        const double clearance = queries.computeDistToBoundary(c, false);
+                        ++diagnostics.centerMembershipChecks;
+                        const bool centerInside = queries.insideDomain(c);
                         lastRadius = tangentRadius;
                         lastClearance = clearance;
                         lastCenter = c;
                         // Strict conservative certificate; do not add a positive acceptance slack.
-                        if (std::isfinite(clearance) &&
+                        if (centerInside && std::isfinite(clearance) &&
                             clearance >= tangentRadius + tangentSettings.containmentMargin) {
                             accepted = true;
                             break;
@@ -215,7 +205,9 @@ void WalkOnTangentSpheres<T, 2>::solve(const PDE<T, 2>& pde,
                     diagnostics.minEffectiveCap = std::min(diagnostics.minEffectiveCap, capChordRadius);
                     diagnostics.maxEffectiveCap = std::max(diagnostics.maxEffectiveCap, capChordRadius);
                     const double complementaryMass = tangent_disk::complementaryMass(tangentRadius, capChordRadius);
-                    // Known Neumann data evaluated at physical boundary, not at y.
+                    // Neumann data are evaluated with the approach direction.
+                    // At corners this is the chosen convention, not necessarily a
+                    // face-normal trace; its discrepancy remains an approximation.
                     T increment = pde.robin(reflectingBoundaryPt, normal, false) +
                                   pde.source(currentPt) * float(tangentRadius / 2);
                     total = total + increment * float(1 / complementaryMass);

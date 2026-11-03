@@ -4,6 +4,7 @@
 #pragma once
 #include "rectangle.h"
 #include <wosx/point_estimation/walk_on_stars.h>
+#include "query_statistics.h"
 #include <iostream>
 #include <array>
 
@@ -164,7 +165,7 @@ inline void validateSolver()
     setupPDE(pde, Problem::Constant);
     WalkSettings w(.01f, .01f, 100000, false);
     TangentSphereSettings t;
-    WalkOnTangentSpheres<float, 2> solver(rect.queries, rect.nearestQuery());
+    WalkOnTangentSpheres<float, 2> solver(rect.queries);
     auto pt = samplePoint(18);
     SampleStatistics<float, 2> stats;
     TangentSphereDiagnostics diag;
@@ -174,20 +175,28 @@ inline void validateSolver()
                 diag.tangentSteps > 0 && diag.failures == 0,
             "Recursive constant test completion");
     require(rect.counts.ray == 0 && rect.counts.starRadius == 0, "Walk on Tangent Spheres used ray/star queries");
-    require(rect.counts.wholeBoundary.load() == diag.nearestPointQueries + diag.centerCertificates,
-            "Whole-boundary query accounting mismatch");
-    require(rect.counts.absorbingDistance == 0 && rect.counts.reflectingDistance == 0 &&
-                rect.counts.absorbingProjection == 0 && rect.counts.reflectingProjection == 0,
-            "Walk on Tangent Spheres used separate distance or projection queries");
-    const auto nearJunction = rect.nearestBoundary(Vector2(.995f, .001f));
-    require(nearJunction.isNeumann && nearJunction.normalIsUnique, "Nearest-boundary classification near junction");
-    require(!rect.nearestBoundary(Vector2(.999f, .02f)).isNeumann, "Nearest Dirichlet classification");
+    require(rect.counts.absorbingProjection == diag.nearestPointQueries &&
+                rect.counts.reflectingProjection == diag.nearestPointQueries &&
+                rect.counts.absorbingDistance == diag.centerCertificates &&
+                rect.counts.reflectingDistance == diag.centerCertificates &&
+                rect.counts.membership == diag.initialMembershipChecks + diag.centerMembershipChecks,
+            "Shared projection/distance/membership accounting mismatch");
+    Vector2 nearest(.995f, .001f), normal;
+    float distance;
+    BoundaryType type;
+    require(rect.queries.projectToBoundaryWithType(nearest, normal, distance, type, false) &&
+                type == BoundaryType::Reflecting,
+            "Nearest partition label near junction");
+    nearest = Vector2(.999f, .02f);
+    require(rect.queries.projectToBoundaryWithType(nearest, normal, distance, type, false) &&
+                type == BoundaryType::Absorbing,
+            "Nearest Dirichlet partition label");
     auto junctionPoint = samplePoint(91, Vector2(.995f, .001f));
     SampleStatistics<float, 2> junctionStats;
     TangentSphereDiagnostics junctionDiag;
     solver.solve(pde, w, t, 1, junctionPoint, junctionStats, junctionDiag);
     require(junctionDiag.tangentSteps > 0, "Dirichlet tolerance incorrectly overrode a nearer Neumann boundary");
-    std::cout << "PASS: one whole-boundary query per visited point, no re-projections, nearest-type junction policy\n";
+    std::cout << "PASS: shared typed projection, distance/membership accounting, nearest-type junction policy\n";
     auto expectReject = [&](auto invoke) {
         bool rejected = false;
         try {
@@ -231,11 +240,11 @@ inline void validateSolver()
     expectReject([&] {
         solver.solve(pde, w, invalid, 1, pt, stats, diag);
     });
-    WalkOnTangentSpheres<float, 2> badGeometry(rect.queries, [](const Vector2&) {
-        TangentBoundaryPoint2D hit;
-        hit.signedClearance = -1;
-        return hit;
-    });
+    Rectangle outside;
+    outside.queries.insideDomain = [](const Vector2&) {
+        return false;
+    };
+    WalkOnTangentSpheres<float, 2> badGeometry(outside.queries);
     expectReject([&] {
         badGeometry.solve(pde, w, t, 1, pt, stats, diag);
     });
@@ -271,7 +280,7 @@ inline void validateManufacturedRecursion()
         setupPDE(pde, problem);
         WalkSettings w(.01f, .01f, 100000, false);
         TangentSphereSettings t;
-        WalkOnTangentSpheres<float, 2> solver(rect.queries, rect.nearestQuery());
+        WalkOnTangentSpheres<float, 2> solver(rect.queries);
         auto pt = samplePoint(20261030);
         SampleStatistics<float, 2> statistics;
         TangentSphereDiagnostics diagnostics;
@@ -314,9 +323,9 @@ inline void validateManufacturedRecursion()
     auto b = a;
     std::vector<SampleStatistics<float, 2>> serialStatistics, parallelStatistics;
     std::vector<TangentSphereDiagnostics> serialDiagnostics, parallelDiagnostics;
-    WalkOnTangentSpheres<float, 2>(serialRect.queries, serialRect.nearestQuery())
+    WalkOnTangentSpheres<float, 2>(serialRect.queries)
         .solve(pde, w, t, std::vector<int>{200, 200}, a, serialStatistics, serialDiagnostics, true);
-    WalkOnTangentSpheres<float, 2>(parallelRect.queries, parallelRect.nearestQuery())
+    WalkOnTangentSpheres<float, 2>(parallelRect.queries)
         .solve(pde, w, t, std::vector<int>{200, 200}, b, parallelStatistics, parallelDiagnostics, false);
     for (size_t i = 0; i < a.size(); ++i) {
         close(serialStatistics[i].getEstimatedSolution(), parallelStatistics[i].getEstimatedSolution(), 0,
@@ -329,8 +338,7 @@ inline void validateManufacturedRecursion()
     }
     const auto& c = serialRect.counts;
     const auto& d = parallelRect.counts;
-    require(c.wholeBoundary.load() == d.wholeBoundary.load() &&
-                c.absorbingDistance.load() == d.absorbingDistance.load() &&
+    require(c.membership.load() == d.membership.load() && c.absorbingDistance.load() == d.absorbingDistance.load() &&
                 c.reflectingDistance.load() == d.reflectingDistance.load() &&
                 c.absorbingProjection.load() == d.absorbingProjection.load() &&
                 c.reflectingProjection.load() == d.reflectingProjection.load(),
@@ -338,10 +346,142 @@ inline void validateManufacturedRecursion()
     std::cout << "PASS: seeded serial/parallel means, variances, diagnostics and atomic query counts agree\n";
 }
 
+inline void validateTypedProjection()
+{
+    using namespace wosx;
+    // Synthetic callback tests exercise the public API; no mesh preprocessing or
+    // topology/orientation/signed-distance validation is performed.
+    GeometricQueries<2> queries;
+    auto project = [](float distance, bool found) {
+        return [distance, found](Vector2& p, Vector2& normal, float& result, bool sign) {
+            if (!found) {
+                return false;
+            }
+            p = Vector2(distance, 0);
+            normal = Vector2(1, 0);
+            result = sign ? -distance : distance;
+            return true;
+        };
+    };
+    queries.projectToAbsorbingBoundary = project(2, true);
+    queries.projectToReflectingBoundary = project(1, true);
+    Vector2 point = Vector2::Zero(), normal;
+    float distance;
+    BoundaryType type;
+    require(queries.projectToBoundaryWithType(point, normal, distance, type, false) &&
+                type == BoundaryType::Reflecting && distance == 1,
+            "Typed projection selects nearer reflecting result");
+    queries.projectToReflectingBoundary = project(2, true);
+    require(queries.projectToBoundaryWithType(point, normal, distance, type, true) && type == BoundaryType::Absorbing &&
+                distance == -2,
+            "Signed-distance tie preserves absorbing preference");
+    Vector2 legacy = Vector2::Zero(), legacyNormal;
+    float legacyDistance;
+    require(queries.projectToBoundary(legacy, legacyNormal, legacyDistance, true) && legacyDistance == distance &&
+                legacy == point,
+            "Legacy projection delegates without changing its result");
+    queries.projectToAbsorbingBoundary = project(2, false);
+    require(queries.projectToBoundaryWithType(point, normal, distance, type, false) && type == BoundaryType::Reflecting,
+            "Reflecting-only projection success");
+    queries.projectToReflectingBoundary = project(1, false);
+    require(!queries.projectToBoundaryWithType(point, normal, distance, type, false) && type == BoundaryType::None &&
+                distance == 0,
+            "Projection failure label");
+
+    // Prove that nested membership searches remain instrumented, without
+    // introducing a geometry representation or a mesh-validation requirement.
+    QueryStatistics counts;
+    queries.domainIsWatertight = true;
+    queries.intersectAbsorbingBoundaryAllHits = [](const Vector2&, const Vector2&, const Vector2&, float, bool,
+                                                   std::vector<IntersectionPoint<2>>&) {
+        return 1;
+    };
+    queries.intersectReflectingBoundaryAllHits = [](const Vector2&, const Vector2&, const Vector2&, float, bool,
+                                                    std::vector<IntersectionPoint<2>>&) {
+        return 0;
+    };
+    instrumentQueries(queries, counts);
+    require(queries.insideDomain(Vector2::Zero()) && counts.membership == 1 && counts.allHits == 4 &&
+                counts.total() == 4,
+            "Membership ray searches are counted without double counting");
+    std::cout << "PASS: typed/legacy projection selection, ties, failures and membership-ray instrumentation\n";
+}
+
+inline void validateApproachDirection()
+{
+    using namespace wosx;
+    GeometricQueries<2> queries;
+    queries.domainIsWatertight = true;
+    queries.hasNonEmptyAbsorbingBoundary = true;
+    queries.hasNonEmptyReflectingBoundary = true;
+    queries.domainMin = Vector2(-2, -2);
+    queries.domainMax = Vector2(2, 2);
+    queries.insideDomain = [](const Vector2&) {
+        return true;
+    };
+    queries.computeDistToAbsorbingBoundary = [](const Vector2&, bool) {
+        return 10.f;
+    };
+    queries.computeDistToReflectingBoundary = [](const Vector2&, bool) {
+        return 10.f;
+    };
+    const Vector2 start(.1f, .2f);
+    queries.projectToBoundaryWithType = [start](Vector2& p, Vector2& normal, float& distance, BoundaryType& type,
+                                                bool) {
+        // Return a deliberately unusable primitive normal. WoTS must ignore it.
+        normal = Vector2::Constant(std::numeric_limits<float>::quiet_NaN());
+        if ((p - start).squaredNorm() == 0) {
+            distance = start.norm();
+            p = Vector2::Zero();
+            type = BoundaryType::Reflecting;
+        } else {
+            distance = 0;
+            type = BoundaryType::Absorbing;
+        }
+        return true;
+    };
+    PDE<float, 2> pde;
+    setupPDE(pde, Problem::Constant);
+    int neumannCalls = 0;
+    pde.robin = [&](const Vector2& p, const Vector2& normal, bool) {
+        ++neumannCalls;
+        require(p == Vector2::Zero(), "Projected Neumann point was not reused");
+        require((normal + start.normalized()).norm() < 1e-6f, "Neumann callback did not receive approach direction");
+        return 0.f;
+    };
+    auto point = samplePoint(19, start);
+    SampleStatistics<float, 2> stats;
+    TangentSphereDiagnostics diag;
+    WalkSettings settings(.01f, .3f, 10, false);
+    TangentSphereSettings tangent;
+    WalkOnTangentSpheres<float, 2> solver(queries);
+    solver.solve(pde, settings, tangent, 1, point, stats, diag);
+    require(neumannCalls == 1 && diag.tangentSteps == 1 && stats.getEstimatedSolution() == 1,
+            "Approach-dependent corner step");
+    auto exactBoundary = samplePoint(19, Vector2::Zero());
+    queries.projectToBoundaryWithType = [](Vector2& p, Vector2& n, float& distance, BoundaryType& type, bool) {
+        p = Vector2::Zero();
+        n = Vector2::Zero();
+        distance = 0;
+        type = BoundaryType::Reflecting;
+        return true;
+    };
+    bool rejected = false;
+    try {
+        solver.solve(pde, settings, tangent, 1, exactBoundary, stats, diag);
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    require(rejected, "Undefined approach direction at an exact Neumann point was silently accepted");
+    std::cout << "PASS: approach-direction Neumann step ignores primitive normal; exact-boundary guard\n";
+}
+
 inline void selfTest()
 {
     validateDisk();
     validateSampler();
+    validateTypedProjection();
+    validateApproachDirection();
     validateSolver();
     validateManufacturedRecursion();
 }

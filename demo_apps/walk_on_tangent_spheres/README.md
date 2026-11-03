@@ -14,18 +14,36 @@ so s=-f. With constant source the implemented updates are:
 - Near Neumann boundary: add (gN+s r/2)/M_R*, then sample the complementary arc.
 - Near Dirichlet boundary: project and return gD plus accumulated contributions.
 
-The tangent disk is tangent at the current interior point y, not its physical
-boundary projection y0. Its center is y-r n(y0). The solver requires one combined whole-boundary nearest-point callback returning
-distance, closest point, outward normal, boundary type, normal uniqueness, and a
-reliable inside/outside sign. Each visited walk position uses exactly one such
-query, including the final termination check. It reuses the returned point and
-normal without re-projecting. Boundary type is chosen by the nearest point; it
-does not search a farther Dirichlet boundary before a nearer Neumann boundary.
-Each proposed disk center uses one additional whole-boundary query to certify
-containment/clearance, including rejected radius trials. The analytic rectangle
-adapter needs no ray, silhouette, or star-radius operations for Walk on Tangent Spheres.
-A separate engine-mesh benchmark is described below; mesh support is not enabled
-in the original image-based `basic_2d_demo`. No speculative Robin or generalized operator kernel is used.
+The tangent disk is tangent at the current interior point y. WoTS uses the
+existing `GeometricQueries` interface and the same loaded representation as WoSt.
+`projectToBoundaryWithType` queries the existing absorbing and reflecting
+structures and retains the closer result's partition label. Equal distances
+prefer absorbing/Dirichlet, as in the original projection callback. The legacy
+`projectToBoundary` delegates to the typed callback and discards the label.
+
+The approach direction n=(y0-y)/|y0-y| supplies the normal used for both the
+center c=y-r*n and the Neumann-data callback. The artificial source y'=y-eta*n
+lies on the same line, so n also points from y' toward y0. The primitive normal
+returned by projection is ignored, including at corners. This is a documented
+corner convention; its directional-derivative discrepancy remains part of the
+omitted error, not a theorem about face-specific Neumann traces. An exactly
+coincident Neumann point y=y0 has no defined approach direction and fails
+explicitly. There is no face-normal selection or corner-WoS fallback.
+
+For every proposed center, existing `computeDistToBoundary` gives unsigned
+clearance and `insideDomain` determines membership. Their defaults use the two
+partitioned structures and ray-intersection parity, respectively. No extra BVH,
+mesh welding, segment removal, adjacency, pseudonormals, or mesh-validation
+pipeline is required or performed. The optional extra `containmentMargin`
+defaults to zero; the old adapter's fixed float-BVH margin is no longer imposed.
+Callback arithmetic still has finite precision, and this refactor does not
+establish a general numerical containment or convergence guarantee.
+
+The solver checks initial membership once per point's batch. Each subsequent
+visited position uses typed projection; the final check is included. The
+analytic rectangle implements membership analytically, while the supplied mesh
+uses the original WoSX membership callback. A separate engine benchmark is
+available; the original `basic_2d_demo` solver selector remains unchanged.
 
 ## Build and Run
 
@@ -45,25 +63,23 @@ u=1+0.3z+0.2x^2+0.1z^2, s=-0.6, gN=-0.3. At (0,0.1), u=1.031.
 Also available: `--case harmonic` with u=1+0.3z+0.2(x^2-z^2), s=0;
 `--case constant` with u=1, s=gN=0.
 
-The benchmark runs the unchanged WoSt solver on the same analytic rectangle
-geometry/PDE. WoSt retains its original separate boundary queries. It does not
-benchmark FCPW BVH traversal performance. CSV counts distinguish:
+The benchmark runs unchanged WoSt on the same analytic rectangle geometry/PDE.
+It does not benchmark FCPW BVH traversal. CSV counts distinguish logical checks
+from actual partition-query calls:
 
-- `point_nearest_queries`: one whole-boundary query per Walk on Tangent Spheres visited
-  position (steps + 1 per completed walk, including final termination).
-- `center_nearest_queries`: one whole-boundary query per proposed center,
-  including radius rejections.
-- `total_nearest_queries`: both of the above for Walk on Tangent Spheres; separate
-  distance and projection calls for unchanged WoSt.
+- `point_nearest_queries`: typed projection invocations, steps+1 per completed
+  walk. By default each invokes one absorbing and one reflecting projection.
+- `center_nearest_queries`: proposed-center clearance checks, including rejected
+  radius trials. By default each invokes both boundary-distance callbacks.
+- `total_nearest_queries`: actual absorbing/reflecting distance and projection
+  calls; compound callbacks are not counted again.
+- `membership_checks`: initial and proposed-center membership invocations. The
+  rectangle computes these analytically; mesh membership performs ray searches.
 - WoSt ray, boundary-sampling, and star-radius calls: separate operation types.
 
-The Walk on Tangent Spheres adapter searches all four rectangle edges in one operation;
-it does not call the separate Dirichlet/Neumann query callbacks. The initial
-point's combined query already supplies membership information, so no additional
-initial certificate is needed. Query counters are atomic for parallel evaluation.
-Initial sample metadata is computed analytically outside the measured walk.
-Neumann encounters count tangent steps for Walk on Tangent Spheres and reflecting-boundary
-states for WoSt. These are algorithm-specific events.
+Counters are atomic for parallel point evaluation. Initial sample metadata is
+computed outside measured walks. Neumann encounters count tangent steps for WoTS
+and reflecting-boundary states for WoSt, which are algorithm-specific events.
 
 Baseline defaults: d=0.01, r0=0.4, radius reduction 1/2, epsilonD=epsilonN=0.01.
 Use `--cap`, `--radius`, `--tol-dirichlet`, `--tol-neumann`, `--max-steps`,
@@ -89,81 +105,67 @@ constant-solution recursion, mode guards, failure handling, near-junction cap
 fallback, polynomial/harmonic manufactured recursion against unchanged WoSt, and
 seeded serial/parallel reproducibility including query counts. Manufactured
 regressions allow six sampling standard errors plus an explicit absolute bias
-allowance of 0.01; passing is not evidence that this bias vanishes under refinement. It does not prove the general
-singular limit interchanges. Finite-source tests retain the handoff's Delta u=f
+allowance of 0.01; passing is not evidence that this bias vanishes under
+refinement. It does not prove the general singular limit interchanges. Finite-source tests retain the handoff's Delta u=f
 notation explicitly; production solver callbacks always use s=-f.
 
 Only constant-source, zero-absorption, single-sided, watertight mixed interior
 problems and solution estimates are currently accepted. Set PDE::isSourceConstant
 truthfully, including for zero source. Gradient, Robin, screened Poisson, variable
 source, pure Neumann, double-sided/exterior, roulette, splitting, and contribution
-suppression modes are unsupported. A geometry callback must provide unique outward
-Neumann normals and a conservative signed clearance in the combined nearest-point result. Runtime guards cannot prove
-that a user-provided callback is correct.
-
+suppression modes are unsupported. Geometry providers must supply the existing
+projection, distance and membership callbacks. Runtime guards cannot prove that
+user-provided callbacks are correct.
 
 ## Engine Mesh Comparison
 
-The separate `walk_on_tangent_spheres_mesh_benchmark` target uses the supplied engine mesh
-and centroid-based Dirichlet/Neumann labels without editing the supplied loader,
-data, or WoSt solver. Six zero-length closing segments are omitted from the
-Walk on Tangent Spheres BVH and coincident endpoints welded. The nonzero boundary is
-unchanged. One full-boundary FCPW BVH supplies nearest point, segment label and
-signed distance. Segment normals are used for tangent steps; vertex pseudonormals
-are used only for signing distances.
-
-Before any comparisons, the adapter checks closed oriented topology,
-non-adjacent crossings/contacts, every edge's inward/outward orientation, nearest
-query signs against independent winding numbers (including near vertices), and
-BVH distances against brute-force segment distances. Numerical validation is not
-a proof of robustness for arbitrary geometry.
-
-Build and run from the repository root:
+`walk_on_tangent_spheres_mesh_benchmark` loads the supplied `ModelProblem<float>`
+and uses its existing Dirichlet/Neumann meshes and acceleration structures for
+both solvers. It adds no geometry representation or preprocessing. The old mesh
+adapter and its topology, winding, normal and brute-force distance checks have
+been removed entirely; `--validate-only` is no longer an option.
 
 ```bash
 cmake -S . -B build
 cmake --build build --target walk_on_tangent_spheres_mesh_benchmark -j4
-./build/demo_apps/walk_on_tangent_spheres_mesh_benchmark --validate-only
 ./build/demo_apps/walk_on_tangent_spheres_mesh_benchmark --case manufactured
 ./build/demo_apps/walk_on_tangent_spheres_mesh_benchmark --case engine
 ```
 
-Use `--root` if launched elsewhere. `--config` is relative to root. Other options:
-`--points`, `--walks`, `--seed`, `--cap`, `--radius`, `--tol-dirichlet`,
-`--tol-neumann`, `--max-steps`, `--reference-walks`, `--reference-tolerance`.
-Defaults: 16 fixed interior points, 6000 walks per point, d=epsilonD=epsilonN=0.01,
-r0=0.4. Identical points are selected from a fixed 64x64 lattice outside a
-boundary strip of width 0.02 times the mesh diagonal. Results concern those
-selected interior points, not a full image or uniform error across the domain.
+Run from the repository root or set `--root`; `--config` is relative to root.
+Options include `--points`, `--walks`, `--seed`, `--cap`, `--radius`,
+`--tol-dirichlet`, `--tol-neumann`, `--max-steps`, `--reference-walks`, and
+`--reference-tolerance`. Defaults: 16 fixed interior points, 6000 walks per point,
+d=epsilonD=epsilonN=0.01 and r0=0.4. Both methods use identical evaluation points
+from a 64x64 lattice, selected with the existing membership/distance queries
+outside a boundary strip of width 0.02 times the model bounding-box diagonal.
+Results concern selected interior points, not full-domain uniform error.
 
-`manufactured` uses the engine geometry and partition with
-u=1+0.3z+0.2x^2+0.1z^2, s=-0.6, exact Dirichlet values and Neumann data grad(u).n.
-Errors are measured against the exact polynomial. `engine` uses the supplied
-textured Dirichlet data with zero source and homogeneous Neumann data: the
-supplied configuration disables both contributions despite containing nonzero
-textures. WoSt keeps those suppression flags in engine mode; Walk on Tangent Spheres uses
-equivalent zero callbacks. Variable forcing is not enabled.
+`manufactured` uses u=1+0.3z+0.2x^2+0.1z^2, source s=-0.6, exact Dirichlet values,
+and the callback grad(u).n. WoSt supplies its sampled face normal; WoTS supplies
+its approach direction, giving an explicit radial extension of the manufactured
+normal derivative at corners. Exact errors and Monte Carlo SE are reported.
 
-In engine mode, the reference is independently seeded WoSt with 65536 walks per
-point and tolerance 1e-4. Differences are reference discrepancies, not exact
-errors. Reference SE and combined sampling SE are reported. The reference has
-unknown residual bias. RMSE across points and RMS sampling SE are distinct.
+`engine` uses supplied textured Dirichlet values with zero source and homogeneous
+Neumann data, matching the supplied configuration's disabled source/reflecting
+contributions. WoSt retains those suppression flags; WoTS uses equivalent zero
+callbacks. Variable source is not enabled. An independently seeded WoSt reference
+uses 65536 walks per point at tolerance 1e-4. Differences are reference
+discrepancies, not exact errors. Reference and combined sampling SE are reported;
+reference discretization bias remains unknown. RMSE and RMS sampling SE differ.
 
-Mesh mode explicitly enables ordinary-WoS fallback when a nearest Neumann point
-has a nonunique corner normal, using the already obtained distance. This adds no
-query and is separately counted. It does not switch to WoSt. The mesh center
-acceptance check also requires an extra clearance margin of
-8*float_epsilon*mesh_diagonal. Degenerate steps or failed radius searches abort
-rather than reporting survivor-conditioned means. The corner policy and
-approximate tangent rule have no global convergence guarantee.
+`query_statistics.h` only instruments the existing callbacks, in place. It is
+not a geometry adapter. Both lumped query totals include underlying distance,
+projection, star-radius, ray-intersection, boundary-sampling, visibility and
+all-hit ray searches. Membership invocations are reported separately; their
+underlying all-hit searches are already included in totals and are not counted
+twice. Default 2D membership performs two ray directions and searches each
+boundary partition. Center checks, cap fallbacks and radius rejections are also
+reported per walk. The former corner-fallback statistic is removed.
 
-The lumped WoSt query total includes distance, projection, star-radius, ray,
-boundary-sampling AND visibility calls (the older rectangle tables did not
-instrument visibility). Walk on Tangent Spheres queries include visited-point and center
-nearest searches. Center checks, cap fallbacks, corner fallbacks and radius
-rejections are also reported per walk. API calls have different costs; wall times
-must accompany counts. Single-threaded solve timings exclude initial sample
-metadata, mesh loading, BVH builds, geometry validation, evaluation-point
-selection and reference computation for both methods. Reference times are
-reported separately in per-point rows. Repeat seeds and refine tolerances before
-claiming matched-accuracy performance.
+Solve timings are single-threaded and exclude model loading, shared BVH builds,
+point selection, initial point metadata and reference computation for both
+methods. Reference times are reported separately. All input geometry is passed
+through the same original loader. Unsupported modes, zero steps and failed
+radius searches abort without reporting failed-batch survivor means. Repeated
+seeds and tolerance refinement remain necessary for accuracy/performance claims.

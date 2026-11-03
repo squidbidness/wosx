@@ -27,7 +27,7 @@ if(MSVC)
     target_compile_options(walk_on_tangent_spheres_benchmark PRIVATE /bigobj)
 endif()
 
-# mesh benchmark uses the supplied 2D loader and a separate whole-boundary BVH.
+# mesh benchmark uses the existing 2D loader and geometry callbacks for both solvers
 add_executable(walk_on_tangent_spheres_mesh_benchmark walk_on_tangent_spheres/mesh_benchmark.cpp)
 target_link_libraries(walk_on_tangent_spheres_mesh_benchmark wosx)
 target_include_directories(walk_on_tangent_spheres_mesh_benchmark PRIVATE ${WOSX_DEMO_APPS_DEPS_INCLUDES})

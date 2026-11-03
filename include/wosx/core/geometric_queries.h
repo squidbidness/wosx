@@ -72,6 +72,12 @@ struct BoundarySample {
     float pdf;
 };
 
+enum class BoundaryType {
+    None,
+    Absorbing,
+    Reflecting
+};
+
 template <size_t DIM>
 struct GeometricQueries {
     // constructors
@@ -95,6 +101,7 @@ struct GeometricQueries {
     std::function<bool(Vector<DIM>&, Vector<DIM>&, float&, bool)> projectToAbsorbingBoundary;
     std::function<bool(Vector<DIM>&, Vector<DIM>&, float&, bool)> projectToReflectingBoundary;
     std::function<bool(Vector<DIM>&, Vector<DIM>&, float&, bool)> projectToBoundary; // set automatically
+    std::function<bool(Vector<DIM>&, Vector<DIM>&, float&, BoundaryType&, bool)> projectToBoundaryWithType; // set automatically
 
     // offsets a point along a direction
     std::function<Vector<DIM>(const Vector<DIM>&, const Vector<DIM>&)> offsetPointAlongDirection; // set automatically
@@ -251,10 +258,11 @@ void GeometricQueries<DIM>::populate()
         distance = 0.0f;
         return false;
     };
-    projectToBoundary = [this](Vector<DIM>& x, Vector<DIM>& normal,
-                               float& distance, bool computeSignedDistance) -> bool {
+    projectToBoundaryWithType = [this](Vector<DIM>& x, Vector<DIM>& normal,
+                                       float& distance, BoundaryType& boundaryType,
+                                       bool computeSignedDistance) -> bool {
         distance = std::numeric_limits<float>::max();
-        bool didProject = false;
+        boundaryType = BoundaryType::None;
         Vector<DIM> absorbingBoundaryPt = x;
         Vector<DIM> reflectingBoundaryPt = x;
         Vector<DIM> absorbingBoundaryNormal;
@@ -267,22 +275,33 @@ void GeometricQueries<DIM>::populate()
             x = absorbingBoundaryPt;
             normal = absorbingBoundaryNormal;
             distance = distanceToAbsorbingBoundary;
-            didProject = true;
+            boundaryType = BoundaryType::Absorbing;
         }
 
         if (this->projectToReflectingBoundary(reflectingBoundaryPt, reflectingBoundaryNormal,
                                               distanceToReflectingBoundary, computeSignedDistance)) {
-            if (std::fabs(distanceToReflectingBoundary) < std::fabs(distance)) {
+            // preserve the original projection's absorbing-boundary preference on ties
+            if (boundaryType == BoundaryType::None ||
+                std::fabs(distanceToReflectingBoundary) < std::fabs(distance)) {
                 x = reflectingBoundaryPt;
                 normal = reflectingBoundaryNormal;
                 distance = distanceToReflectingBoundary;
+                boundaryType = BoundaryType::Reflecting;
             }
-
-            didProject = true;
         }
 
-        if (!didProject) distance = 0.0f;
-        return didProject;
+        if (boundaryType == BoundaryType::None) {
+            distance = 0.0f;
+            return false;
+        }
+
+        return true;
+    };
+    projectToBoundary = [this](Vector<DIM>& x, Vector<DIM>& normal,
+                               float& distance, bool computeSignedDistance) -> bool {
+        BoundaryType boundaryType;
+        return this->projectToBoundaryWithType(x, normal, distance, boundaryType,
+                                               computeSignedDistance);
     };
     offsetPointAlongDirection = [](const Vector<DIM>& x, const Vector<DIM>& dir) -> Vector<DIM> {
         return offsetPointAlongDirectionImpl<DIM>(x, dir);

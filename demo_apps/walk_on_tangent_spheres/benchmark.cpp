@@ -90,7 +90,7 @@ int main(int argc, char** argv)
         std::cout
             << "solver,walks,reference,mean,signed_error,mc_se,seconds,mean_steps,neumann_encounters,"
             << "distance_D,distance_N,project_D,project_N,ray_queries,boundary_samples,star_queries,"
-            << "point_nearest_queries,center_nearest_queries,total_nearest_queries,radius_rejections,cap_adjustments,min_effective_cap,max_effective_cap,failures\n";
+            << "point_nearest_queries,center_nearest_queries,total_nearest_queries,membership_checks,radius_rejections,cap_adjustments,min_effective_cap,max_effective_cap,failures\n";
         for (const std::string algorithm : {std::string("walk_on_tangent_spheres"), std::string("wost")}) {
             if (solverType != "both" && solverType != algorithm) {
                 continue;
@@ -110,7 +110,7 @@ int main(int argc, char** argv)
                 TangentSphereSettings tangentSettings;
                 tangentSettings.capChordRadius = cap;
                 tangentSettings.initialTangentRadius = radius;
-                WalkOnTangentSpheres<float, 2> solver(rectangle.queries, rectangle.nearestQuery());
+                WalkOnTangentSpheres<float, 2> solver(rectangle.queries);
                 try {
                     solver.solve(pde, walkSettings, tangentSettings, nWalks, samplePt, statistics, diagnostics);
                 } catch (const std::exception& error) {
@@ -151,10 +151,10 @@ int main(int argc, char** argv)
                       << queryCounts.reflectingProjection << ',' << queryCounts.ray << ',' << queryCounts.boundarySample
                       << ',' << queryCounts.starRadius << ',' << diagnostics.nearestPointQueries << ','
                       << diagnostics.centerCertificates << ','
-                      << queryCounts.wholeBoundary.load() + queryCounts.absorbingDistance.load() +
-                             queryCounts.reflectingDistance.load() + queryCounts.absorbingProjection.load() +
-                             queryCounts.reflectingProjection.load()
-                      << ',' << diagnostics.radiusRejections << ',' << diagnostics.capAdjustments << ',';
+                      << queryCounts.absorbingDistance.load() + queryCounts.reflectingDistance.load() +
+                             queryCounts.absorbingProjection.load() + queryCounts.reflectingProjection.load()
+                      << ',' << queryCounts.membership << ',' << diagnostics.radiusRejections << ','
+                      << diagnostics.capAdjustments << ',';
             if (std::isfinite(diagnostics.minEffectiveCap)) {
                 std::cout << diagnostics.minEffectiveCap;
             } else {

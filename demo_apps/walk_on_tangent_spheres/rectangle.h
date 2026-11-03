@@ -17,7 +17,6 @@ struct QueryCounts {
     std::atomic<uint64_t> boundarySample{0};
     std::atomic<uint64_t> starRadius{0};
     std::atomic<uint64_t> membership{0};
-    std::atomic<uint64_t> wholeBoundary{0};
 };
 
 // All callbacks capture this object: do not copy/move it after construction.
@@ -25,18 +24,17 @@ struct QueryCounts {
 struct Rectangle {
     // constructors
     Rectangle();
-    wosx::GeometricQueries<2> queries;
-    QueryCounts counts;
     Rectangle(const Rectangle&) = delete;
     Rectangle& operator=(const Rectangle&) = delete;
 
+    // geometric queries
     static double clearance(const wosx::Vector2& pt);
     static bool contains(const wosx::Vector2& pt);
     static wosx::Vector2 nearestAbsorbingBoundaryPoint(const wosx::Vector2& pt);
-    // One closest-point search across all four edges. Ties prefer Dirichlet;
-    // at actual rectangle corners the outward normal is declared non-unique.
-    wosx::TangentBoundaryPoint2D nearestBoundary(const wosx::Vector2& pt);
-    wosx::TangentNearestBoundary2D nearestQuery();
+
+    // members
+    wosx::GeometricQueries<2> queries;
+    QueryCounts counts;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -64,38 +62,6 @@ inline wosx::Vector2 Rectangle::nearestAbsorbingBoundaryPoint(const wosx::Vector
         hit = c;
     }
     return hit;
-}
-
-inline wosx::TangentBoundaryPoint2D Rectangle::nearestBoundary(const wosx::Vector2& pt)
-{
-    using namespace wosx;
-    ++counts.wholeBoundary;
-    const float x = std::clamp(pt.x(), -1.f, 1.f), z = std::clamp(pt.y(), 0.f, 1.f);
-    const Vector2 candidates[4] = {Vector2(-1, z), Vector2(1, z), Vector2(x, 1), Vector2(x, 0)};
-    const Vector2 normals[4] = {Vector2(-1, 0), Vector2(1, 0), Vector2(0, 1), Vector2(0, -1)};
-    int best = 0;
-    double distance = (pt - candidates[0]).cast<double>().squaredNorm();
-    for (int i = 1; i < 4; ++i) {
-        const double trial = (pt - candidates[i]).cast<double>().squaredNorm();
-        if (trial < distance) {
-            distance = trial;
-            best = i;
-        }
-    }
-    TangentBoundaryPoint2D hit;
-    hit.point = candidates[best];
-    hit.normal = normals[best];
-    hit.signedClearance = std::sqrt(distance) * (contains(pt) ? 1 : -1);
-    hit.isNeumann = best == 3;
-    hit.normalIsUnique = !(std::abs(hit.point.x()) == 1 && (hit.point.y() == 0 || hit.point.y() == 1));
-    return hit;
-}
-
-inline wosx::TangentNearestBoundary2D Rectangle::nearestQuery()
-{
-    return [this](const wosx::Vector2& pt) {
-        return nearestBoundary(pt);
-    };
 }
 
 inline Rectangle::Rectangle()
@@ -137,8 +103,7 @@ inline Rectangle::Rectangle()
         if (computeSignedDistance && queryPt.y() >= 0) {
             d = -d;
         }
-        // At the bottom endpoints the physical normal is not unique.
-        return pt.x() > -1 && pt.x() < 1;
+        return true;
     };
     queries.insideDomain = [this](const Vector2& pt) {
         ++counts.membership;
